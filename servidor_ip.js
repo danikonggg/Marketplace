@@ -19,7 +19,10 @@ const app = express();
 // Necesario en Render para obtener la IP real del visitante
 app.set('trust proxy', true);
 
-const ARCHIVO_LOG = path.join(__dirname, 'visitas_registradas.txt');
+// En Vercel solo /tmp es escribible; en Render/local usamos el proyecto
+const ARCHIVO_LOG = process.env.VERCEL
+  ? path.join('/tmp', 'visitas_registradas.txt')
+  : path.join(__dirname, 'visitas_registradas.txt');
 
 // Aquí guardamos las IPs que visitan
 const visitas = [];
@@ -254,19 +257,24 @@ app.get('/ver-ips', (req, res) => {
 
 const PORT = process.env.PORT || process.argv[2] || 3000; // Mac usa 5000 para AirPlay
 
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log('='.repeat(50));
-  console.log('Servidor de captura de IPs iniciado (Node.js)');
-  console.log(`Comparte este link: http://localhost:${PORT}/`);
-  console.log(`Para ver las IPs: http://localhost:${PORT}/ver-ips`);
-  console.log('='.repeat(50));
-});
+// En Vercel exportamos el app; en Render/local arrancamos el servidor
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log('='.repeat(50));
+    console.log('Servidor de captura de IPs iniciado (Node.js)');
+    console.log(`Comparte este link: http://localhost:${PORT}/`);
+    console.log(`Para ver las IPs: http://localhost:${PORT}/ver-ips`);
+    console.log('='.repeat(50));
+  });
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`\n❌ Puerto ${PORT} ya está en uso. Prueba otro: node servidor_ip.js 8080`);
-  } else {
-    console.error('Error:', err);
-  }
-  process.exit(1);
-});
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n❌ Puerto ${PORT} ya está en uso. Prueba otro: node servidor_ip.js 8080`);
+    } else {
+      console.error('Error:', err);
+    }
+    process.exit(1);
+  });
+}
