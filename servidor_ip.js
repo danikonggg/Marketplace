@@ -23,11 +23,15 @@ const visitas = [];
 
 function guardarEnArchivo(visita) {
   const u = visita.ubicacion || {};
+  const loc = [u.ciudad, u.region, u.pais].filter(Boolean).filter(x => x !== '-').join(', ') || `${u.ciudad || '?'}, ${u.pais || '?'}`;
   const linea = [
     `[${visita.fecha}]`,
     `IP: ${visita.ip}`,
-    `Ubicación: ${u.ciudad || '?'}, ${u.pais || '?'}`,
+    `Ubicación: ${loc}`,
+    `Código postal: ${u.postal || '-'}`,
+    `Zona horaria: ${u.timezone || '-'}`,
     `Coordenadas: ${u.lat}, ${u.lon}`,
+    `ISP: ${u.isp || '-'}`,
     `User-Agent: ${visita.user_agent}`,
     '---'
   ].join('\n') + '\n';
@@ -36,15 +40,43 @@ function guardarEnArchivo(visita) {
 
 async function obtenerUbicacion(ip) {
   if (ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
-    return { ciudad: 'Local', pais: 'localhost', lat: '-', lon: '-', isp: '-' };
+    return { ciudad: 'Local', pais: 'localhost', lat: '-', lon: '-', region: '-', postal: '-', timezone: '-', isp: '-' };
   }
+
+  const vacio = { ciudad: '?', pais: '?', lat: '-', lon: '-', region: '-', postal: '-', timezone: '-', isp: '?' };
+
+  // ipinfo.io - base de datos más precisa, más campos
   try {
-    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,city,lat,lon,isp`);
+    const res = await fetch(`https://ipinfo.io/${ip}/json`, { headers: { 'Accept': 'application/json' } });
     const data = await res.json();
-    if (data.status === 'success') {
+    if (data && !data.error) {
+      const [lat, lon] = (data.loc || '-,-').split(',');
       return {
         ciudad: data.city || '?',
         pais: data.country || '?',
+        region: data.region || '-',
+        postal: data.postal || '-',
+        timezone: data.timezone || '-',
+        lat: lat || '-',
+        lon: lon || '-',
+        isp: data.org || '?'
+      };
+    }
+  } catch (e) {
+    console.log('ipinfo falló, intentando ip-api...', e.message);
+  }
+
+  // Fallback: ip-api.com
+  try {
+    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,regionName,city,zip,lat,lon,timezone,isp`);
+    const data = await res.json();
+    if (data && data.status === 'success') {
+      return {
+        ciudad: data.city || '?',
+        pais: data.country || '?',
+        region: data.regionName || '-',
+        postal: data.zip || '-',
+        timezone: data.timezone || '-',
         lat: data.lat ?? '-',
         lon: data.lon ?? '-',
         isp: data.isp || '?'
@@ -53,7 +85,7 @@ async function obtenerUbicacion(ip) {
   } catch (e) {
     console.log('Error geolocalización:', e.message);
   }
-  return { ciudad: '?', pais: '?', lat: '-', lon: '-', isp: '?' };
+  return vacio;
 }
 
 app.get('/', async (req, res) => {
@@ -135,6 +167,7 @@ app.get('/ver-ips', (req, res) => {
     .card .ip { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: #22d3ee; font-weight: 600; }
     .card .fecha { color: #71717a; font-size: 0.85rem; margin: 0.25rem 0; }
     .card .ubicacion { color: #a78bfa; margin: 0.25rem 0; }
+    .card .extra { font-size: 0.85rem; color: #71717a; margin: 0.35rem 0; }
     .card .ua { color: #52525b; font-size: 0.8rem; margin-top: 0.5rem; }
     .empty {
       text-align: center;
@@ -158,13 +191,20 @@ app.get('/ver-ips', (req, res) => {
 
   let cards = visitas.map(v => {
     const u = v.ubicacion || {};
-    const loc = `${u.ciudad || '?'}, ${u.pais || '?'}`;
-    const coord = u.lat !== '-' ? ` (${u.lat}, ${u.lon})` : '';
+    const parts = [u.ciudad, u.region, u.pais].filter(Boolean).filter(x => x !== '-' && x !== '?');
+    const loc = parts.length ? parts.join(', ') : `${u.ciudad || '?'}, ${u.pais || '?'}`;
+    const extra = [];
+    if (u.postal && u.postal !== '-') extra.push(`📮 ${u.postal}`);
+    if (u.timezone && u.timezone !== '-') extra.push(`🕐 ${u.timezone}`);
+    if (u.lat !== '-') extra.push(`📍 ${u.lat}, ${u.lon}`);
+    if (u.isp && u.isp !== '-' && u.isp !== '?') extra.push(`📡 ${u.isp}`);
+    const extraHtml = extra.length ? `<div class="extra">${extra.join(' · ')}</div>` : '';
     return `
       <div class="card">
         <div class="ip">${v.ip}</div>
         <div class="fecha">${v.fecha}</div>
-        <div class="ubicacion">📍 ${loc}${coord}</div>
+        <div class="ubicacion">${loc}</div>
+        ${extraHtml}
         <div class="ua">${v.user_agent.substring(0, 90)}${v.user_agent.length > 90 ? '...' : ''}</div>
       </div>
     `;
