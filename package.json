@@ -1,0 +1,15 @@
+{
+  "name": "capturador-ip",
+  "version": "1.0.0",
+  "description": "Servidor para capturar IPs y ubicación - Tarea ciberseguridad",
+  "main": "servidor_ip.js",
+  "scripts": {
+    "start": "node servidor_ip.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

@@ -1,0 +1,6 @@
+[19/2/2026, 22:03:32]
+IP: 127.0.0.1
+Ubicación: Local, localhost
+Coordenadas: -, -
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Cursor/2.5.17 Chrome/142.0.7444.265 Electron/39.3.0 Safari/537.36
+---
