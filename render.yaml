@@ -1,0 +1,8 @@
+# Configuración para Render.com
+services:
+  - type: web
+    name: capturador-ip
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health

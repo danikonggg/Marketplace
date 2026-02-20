@@ -16,26 +16,33 @@ const fs = require('fs');
 const path = require('path');
 const app = express();
 
+// Necesario en Render para obtener la IP real del visitante
+app.set('trust proxy', true);
+
 const ARCHIVO_LOG = path.join(__dirname, 'visitas_registradas.txt');
 
 // Aquí guardamos las IPs que visitan
 const visitas = [];
 
 function guardarEnArchivo(visita) {
-  const u = visita.ubicacion || {};
-  const loc = [u.ciudad, u.region, u.pais].filter(Boolean).filter(x => x !== '-').join(', ') || `${u.ciudad || '?'}, ${u.pais || '?'}`;
-  const linea = [
-    `[${visita.fecha}]`,
-    `IP: ${visita.ip}`,
-    `Ubicación: ${loc}`,
-    `Código postal: ${u.postal || '-'}`,
-    `Zona horaria: ${u.timezone || '-'}`,
-    `Coordenadas: ${u.lat}, ${u.lon}`,
-    `ISP: ${u.isp || '-'}`,
-    `User-Agent: ${visita.user_agent}`,
-    '---'
-  ].join('\n') + '\n';
-  fs.appendFileSync(ARCHIVO_LOG, linea, 'utf8');
+  try {
+    const u = visita.ubicacion || {};
+    const loc = [u.ciudad, u.region, u.pais].filter(Boolean).filter(x => x !== '-').join(', ') || `${u.ciudad || '?'}, ${u.pais || '?'}`;
+    const linea = [
+      `[${visita.fecha}]`,
+      `IP: ${visita.ip}`,
+      `Ubicación: ${loc}`,
+      `Código postal: ${u.postal || '-'}`,
+      `Zona horaria: ${u.timezone || '-'}`,
+      `Coordenadas: ${u.lat}, ${u.lon}`,
+      `ISP: ${u.isp || '-'}`,
+      `User-Agent: ${visita.user_agent}`,
+      '---'
+    ].join('\n') + '\n';
+    fs.appendFileSync(ARCHIVO_LOG, linea, 'utf8');
+  } catch (e) {
+    console.error('No se pudo guardar en archivo:', e.message);
+  }
 }
 
 async function obtenerUbicacion(ip) {
@@ -45,11 +52,18 @@ async function obtenerUbicacion(ip) {
 
   const vacio = { ciudad: '?', pais: '?', lat: '-', lon: '-', region: '-', postal: '-', timezone: '-', isp: '?' };
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
   // ipinfo.io - base de datos más precisa, más campos
   try {
-    const res = await fetch(`https://ipinfo.io/${ip}/json`, { headers: { 'Accept': 'application/json' } });
+    const res = await fetch(`https://ipinfo.io/${ip}/json`, { 
+      headers: { 'Accept': 'application/json' },
+      signal: controller.signal 
+    });
     const data = await res.json();
     if (data && !data.error) {
+      clearTimeout(timeout);
       const [lat, lon] = (data.loc || '-,-').split(',');
       return {
         ciudad: data.city || '?',
@@ -63,12 +77,19 @@ async function obtenerUbicacion(ip) {
       };
     }
   } catch (e) {
+    clearTimeout(timeout);
     console.log('ipinfo falló, intentando ip-api...', e.message);
   }
 
+  const controller2 = new AbortController();
+  const timeout2 = setTimeout(() => controller2.abort(), 5000);
+
   // Fallback: ip-api.com
   try {
-    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,regionName,city,zip,lat,lon,timezone,isp`);
+    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,regionName,city,zip,lat,lon,timezone,isp`, {
+      signal: controller2.signal
+    });
+    clearTimeout(timeout2);
     const data = await res.json();
     if (data && data.status === 'success') {
       return {
@@ -83,13 +104,19 @@ async function obtenerUbicacion(ip) {
       };
     }
   } catch (e) {
+    clearTimeout(timeout2);
     console.log('Error geolocalización:', e.message);
   }
   return vacio;
 }
 
+// Ruta ligera para health check de Render (evita timeout)
+app.get('/health', (req, res) => {
+  res.status(200).send('ok');
+});
+
 app.get('/', async (req, res) => {
-  let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+  let ip = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.socket.remoteAddress || req.ip;
   if (ip && ip.includes(',')) ip = ip.split(',')[0].trim();
   if (ip === '::1') ip = '127.0.0.1';
 
