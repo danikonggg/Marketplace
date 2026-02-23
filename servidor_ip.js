@@ -20,6 +20,18 @@ const Visita = require('./models/Visita');
 // Necesario en Render/Vercel para obtener la IP real del visitante
 app.set('trust proxy', true);
 
+function puntuarUbicacion(u) {
+  let pts = 0;
+  if (u.ciudad && u.ciudad !== '?' && u.ciudad !== '-') pts += 2;
+  if (u.region && u.region !== '?' && u.region !== '-') pts += 1;
+  if (u.pais && u.pais !== '?' && u.pais !== '-') pts += 2;
+  if (u.lat && u.lat !== '-') pts += 2;
+  if (u.lon && u.lon !== '-') pts += 2;
+  if (u.isp && u.isp !== '?' && u.isp !== '-') pts += 1;
+  if (u.timezone && u.timezone !== '-') pts += 1;
+  return pts;
+}
+
 async function obtenerUbicacion(ip) {
   if (ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
     return { ciudad: 'Local', pais: 'localhost', lat: '-', lon: '-', region: '-', postal: '-', timezone: '-', isp: '-' };
@@ -27,62 +39,70 @@ async function obtenerUbicacion(ip) {
 
   const vacio = { ciudad: '?', pais: '?', lat: '-', lon: '-', region: '-', postal: '-', timezone: '-', isp: '?' };
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const resultados = [];
 
-  // ipinfo.io - base de datos más precisa, más campos
-  try {
-    const res = await fetch(`https://ipinfo.io/${ip}/json`, { 
-      headers: { 'Accept': 'application/json' },
-      signal: controller.signal 
+  // Consultar las 3 APIs en paralelo
+  const consultas = [
+    fetch(`https://ipinfo.io/${ip}/json`, { headers: { 'Accept': 'application/json' } }).then(r => r.json()),
+    fetch(`https://ipapi.co/${ip}/json/`, { headers: { 'Accept': 'application/json' } }).then(r => r.json()),
+    fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city,zip,lat,lon,timezone,isp`).then(r => r.json())
+  ];
+
+  const [ipinfo, ipapi, ipApi] = await Promise.allSettled(consultas);
+
+  // ipinfo.io
+  if (ipinfo.status === 'fulfilled' && ipinfo.value && !ipinfo.value.error) {
+    const d = ipinfo.value;
+    const [lat, lon] = (d.loc || '-,-').split(',');
+    resultados.push({
+      ciudad: d.city || '?',
+      pais: d.country || '?',
+      region: d.region || '-',
+      postal: d.postal || '-',
+      timezone: d.timezone || '-',
+      lat: lat || '-',
+      lon: lon || '-',
+      isp: d.org || '?'
     });
-    const data = await res.json();
-    if (data && !data.error) {
-      clearTimeout(timeout);
-      const [lat, lon] = (data.loc || '-,-').split(',');
-      return {
-        ciudad: data.city || '?',
-        pais: data.country || '?',
-        region: data.region || '-',
-        postal: data.postal || '-',
-        timezone: data.timezone || '-',
-        lat: lat || '-',
-        lon: lon || '-',
-        isp: data.org || '?'
-      };
-    }
-  } catch (e) {
-    clearTimeout(timeout);
-    console.log('ipinfo falló, intentando ip-api...', e.message);
   }
 
-  const controller2 = new AbortController();
-  const timeout2 = setTimeout(() => controller2.abort(), 5000);
-
-  // Fallback: ip-api.com
-  try {
-    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,regionName,city,zip,lat,lon,timezone,isp`, {
-      signal: controller2.signal
+  // ipapi.co
+  if (ipapi.status === 'fulfilled' && ipapi.value && !ipapi.value.error && ipapi.value.city) {
+    const d = ipapi.value;
+    resultados.push({
+      ciudad: d.city || '?',
+      pais: d.country_name || d.country_code || '?',
+      region: d.region || '-',
+      postal: d.postal || '-',
+      timezone: d.timezone || '-',
+      lat: (d.latitude != null ? String(d.latitude) : '-') || '-',
+      lon: (d.longitude != null ? String(d.longitude) : '-') || '-',
+      isp: d.org || '?'
     });
-    clearTimeout(timeout2);
-    const data = await res.json();
-    if (data && data.status === 'success') {
-      return {
-        ciudad: data.city || '?',
-        pais: data.country || '?',
-        region: data.regionName || '-',
-        postal: data.zip || '-',
-        timezone: data.timezone || '-',
-        lat: data.lat ?? '-',
-        lon: data.lon ?? '-',
-        isp: data.isp || '?'
-      };
-    }
-  } catch (e) {
-    clearTimeout(timeout2);
-    console.log('Error geolocalización:', e.message);
   }
-  return vacio;
+
+  // ip-api.com
+  if (ipApi.status === 'fulfilled' && ipApi.value && ipApi.value.status === 'success') {
+    const d = ipApi.value;
+    resultados.push({
+      ciudad: d.city || '?',
+      pais: d.country || '?',
+      region: d.regionName || '-',
+      postal: d.zip || '-',
+      timezone: d.timezone || '-',
+      lat: (d.lat != null ? String(d.lat) : '-') || '-',
+      lon: (d.lon != null ? String(d.lon) : '-') || '-',
+      isp: d.isp || '?'
+    });
+  }
+
+  if (resultados.length === 0) return vacio;
+
+  // Elegir el resultado con más datos completos
+  const mejor = resultados.reduce((a, b) =>
+    puntuarUbicacion(a) >= puntuarUbicacion(b) ? a : b
+  );
+  return mejor;
 }
 
 // Ruta ligera para health check de Render (evita timeout)
