@@ -130,17 +130,29 @@ app.get('/', async (req, res) => {
     console.error('Error guardando en MongoDB:', e.message);
   }
 
-  const { conectado, mensaje } = await verificarConexion();
-  const bdStatus = conectado
-    ? `<p style="color:#22c55e;">✓ ${mensaje}</p>`
-    : `<p style="color:#ef4444;">⚠ ${mensaje}</p>`;
   res.send(`
-    <html>
-    <head><meta charset="utf-8"><title>Bienvenido</title></head>
-    <body style="font-family: Arial; text-align: center; padding: 50px;">
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"><title>Bienvenido</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600&display=swap');
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: 'DM Sans', sans-serif;
+        background: linear-gradient(135deg, #0c0c0f 0%, #1a1a24 100%);
+        min-height: 100vh;
+        color: #e4e4e7;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+      }
+      h1 { font-size: 1.75rem; font-weight: 600; margin-bottom: 0.5rem; }
+      p { color: #71717a; }
+    </style></head>
+    <body>
       <h1>Página cargada correctamente ✓</h1>
       <p>Gracias por visitar.</p>
-      ${bdStatus}
     </body>
     </html>
   `);
@@ -158,8 +170,8 @@ app.get('/ver-ips', async (req, res) => {
   }
 
   const bdStatus = conectado
-    ? `<span class="bd-ok">✓ ${mensaje}</span>`
-    : `<span class="bd-error">⚠ ${mensaje}</span>`;
+    ? `<div class="bd-pill bd-ok"><span class="bd-dot"></span>${mensaje}</div>`
+    : `<div class="bd-pill bd-error"><span class="bd-dot"></span>${mensaje}</div>`;
 
   const estilos = `
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap');
@@ -218,8 +230,35 @@ app.get('/ver-ips', async (req, res) => {
       border: 1px dashed rgba(255,255,255,0.1);
     }
     .save-note { color: #22c55e; font-size: 0.85rem; margin-top: 1rem; }
-    .bd-ok { color: #22c55e; font-size: 0.9rem; }
-    .bd-error { color: #ef4444; font-size: 0.9rem; }
+    .bd-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0.9rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      margin-bottom: 1rem;
+    }
+    .bd-pill .bd-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .bd-pill.bd-ok {
+      background: rgba(34, 197, 94, 0.15);
+      color: #22c55e;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .bd-pill.bd-ok .bd-dot { animation: bd-pulse 2s infinite; }
+    .bd-pill.bd-error {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .bd-pill.bd-error .bd-dot { background: #f87171; }
+    @keyframes bd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
   `;
 
   if (visitas.length === 0) {
@@ -227,7 +266,7 @@ app.get('/ver-ips', async (req, res) => {
       <!DOCTYPE html>
       <html><head><meta charset="utf-8"><title>Registro de visitas</title><style>${estilos}</style></head>
       <body><div class="container"><h1>🔒 Registro de visitas</h1><p class="subtitle">Ciberseguridad / Redes — MongoDB</p>
-      <p style="margin-bottom:1rem">${bdStatus}</p>
+      <div style="margin-bottom:1rem">${bdStatus}</div>
       <div class="empty">No hay visitas registradas aún.<br>Comparte el link y las verás aquí.</div></div></body></html>
     `);
   }
@@ -260,7 +299,7 @@ app.get('/ver-ips', async (req, res) => {
       <div class="container">
         <h1>🔒 Registro de visitas</h1>
         <p class="subtitle">IPs y ubicaciones capturadas</p>
-        <p style="margin-bottom:1rem">${bdStatus}</p>
+        <div style="margin-bottom:1rem">${bdStatus}</div>
         <span class="badge">${visitas.length} visita${visitas.length !== 1 ? 's' : ''}</span>
         ${cards}
         <p class="save-note">${conectado ? '✓ Datos guardados en MongoDB' : '⚠ Sin conexión a BD'}</p>
