@@ -2,6 +2,7 @@
  * Servidor para capturar IPs de visitantes - Tarea de Ciberseguridad/Redes
  * Cuando alguien visita el link, se registra su IP y ubicación
  */
+require('dotenv').config();
 
 process.on('uncaughtException', (err) => {
   console.error('Error no capturado:', err);
@@ -12,41 +13,12 @@ process.on('unhandledRejection', (err) => {
 });
 
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
 const app = express();
+const { conectarMongo, verificarConexion } = require('./db');
+const Visita = require('./models/Visita');
 
-// Necesario en Render para obtener la IP real del visitante
+// Necesario en Render/Vercel para obtener la IP real del visitante
 app.set('trust proxy', true);
-
-// En Vercel solo /tmp es escribible; en Render/local usamos el proyecto
-const ARCHIVO_LOG = process.env.VERCEL
-  ? path.join('/tmp', 'visitas_registradas.txt')
-  : path.join(__dirname, 'visitas_registradas.txt');
-
-// Aquí guardamos las IPs que visitan
-const visitas = [];
-
-function guardarEnArchivo(visita) {
-  try {
-    const u = visita.ubicacion || {};
-    const loc = [u.ciudad, u.region, u.pais].filter(Boolean).filter(x => x !== '-').join(', ') || `${u.ciudad || '?'}, ${u.pais || '?'}`;
-    const linea = [
-      `[${visita.fecha}]`,
-      `IP: ${visita.ip}`,
-      `Ubicación: ${loc}`,
-      `Código postal: ${u.postal || '-'}`,
-      `Zona horaria: ${u.timezone || '-'}`,
-      `Coordenadas: ${u.lat}, ${u.lon}`,
-      `ISP: ${u.isp || '-'}`,
-      `User-Agent: ${visita.user_agent}`,
-      '---'
-    ].join('\n') + '\n';
-    fs.appendFileSync(ARCHIVO_LOG, linea, 'utf8');
-  } catch (e) {
-    console.error('No se pudo guardar en archivo:', e.message);
-  }
-}
 
 async function obtenerUbicacion(ip) {
   if (ip === '127.0.0.1' || ip === '::1' || ip === 'localhost') {
@@ -124,33 +96,51 @@ app.get('/', async (req, res) => {
   if (ip === '::1') ip = '127.0.0.1';
 
   const userAgent = req.headers['user-agent'] || 'Desconocido';
-
   const ubicacion = await obtenerUbicacion(ip);
+  const fecha = new Date().toLocaleString('es');
 
-  const visita = {
-    ip,
-    fecha: new Date().toLocaleString('es'),
-    user_agent: userAgent,
-    ubicacion
-  };
-  visitas.push(visita);
-  guardarEnArchivo(visita);
+  const visita = { ip, fecha, user_agent: userAgent, ubicacion };
 
-  const loc = ubicacion.ciudad !== '?' ? `${ubicacion.ciudad}, ${ubicacion.pais}` : ubicacion.pais;
-  console.log(`📍 Nueva visita - IP: ${ip} | ${loc} | Hora: ${visita.fecha}`);
+  try {
+    await conectarMongo();
+    await Visita.create(visita);
+    const loc = ubicacion.ciudad !== '?' ? `${ubicacion.ciudad}, ${ubicacion.pais}` : ubicacion.pais;
+    console.log(`📍 Nueva visita - IP: ${ip} | ${loc} | Hora: ${fecha}`);
+  } catch (e) {
+    console.error('Error guardando en MongoDB:', e.message);
+  }
 
+  const { conectado, mensaje } = await verificarConexion();
+  const bdStatus = conectado
+    ? `<p style="color:#22c55e;">✓ ${mensaje}</p>`
+    : `<p style="color:#ef4444;">⚠ ${mensaje}</p>`;
   res.send(`
     <html>
     <head><meta charset="utf-8"><title>Bienvenido</title></head>
     <body style="font-family: Arial; text-align: center; padding: 50px;">
       <h1>Página cargada correctamente ✓</h1>
       <p>Gracias por visitar.</p>
+      ${bdStatus}
     </body>
     </html>
   `);
 });
 
-app.get('/ver-ips', (req, res) => {
+app.get('/ver-ips', async (req, res) => {
+  let visitas = [];
+  const { conectado, mensaje } = await verificarConexion();
+  try {
+    if (conectado) {
+      visitas = await Visita.find({}).sort({ createdAt: -1 }).lean();
+    }
+  } catch (e) {
+    console.error('Error leyendo MongoDB:', e.message);
+  }
+
+  const bdStatus = conectado
+    ? `<span class="bd-ok">✓ ${mensaje}</span>`
+    : `<span class="bd-error">⚠ ${mensaje}</span>`;
+
   const estilos = `
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -208,13 +198,16 @@ app.get('/ver-ips', (req, res) => {
       border: 1px dashed rgba(255,255,255,0.1);
     }
     .save-note { color: #22c55e; font-size: 0.85rem; margin-top: 1rem; }
+    .bd-ok { color: #22c55e; font-size: 0.9rem; }
+    .bd-error { color: #ef4444; font-size: 0.9rem; }
   `;
 
   if (visitas.length === 0) {
     return res.send(`
       <!DOCTYPE html>
       <html><head><meta charset="utf-8"><title>Registro de visitas</title><style>${estilos}</style></head>
-      <body><div class="container"><h1>🔒 Registro de visitas</h1><p class="subtitle">Ciberseguridad / Redes</p>
+      <body><div class="container"><h1>🔒 Registro de visitas</h1><p class="subtitle">Ciberseguridad / Redes — MongoDB</p>
+      <p style="margin-bottom:1rem">${bdStatus}</p>
       <div class="empty">No hay visitas registradas aún.<br>Comparte el link y las verás aquí.</div></div></body></html>
     `);
   }
@@ -246,10 +239,11 @@ app.get('/ver-ips', (req, res) => {
     <body>
       <div class="container">
         <h1>🔒 Registro de visitas</h1>
-        <p class="subtitle">Ciberseguridad / Redes — IPs y ubicaciones capturadas</p>
+        <p class="subtitle">IPs y ubicaciones capturadas</p>
+        <p style="margin-bottom:1rem">${bdStatus}</p>
         <span class="badge">${visitas.length} visita${visitas.length !== 1 ? 's' : ''}</span>
         ${cards}
-        <p class="save-note">✓ Guardado en visitas_registradas.txt</p>
+        <p class="save-note">${conectado ? '✓ Datos guardados en MongoDB' : '⚠ Sin conexión a BD'}</p>
       </div>
     </body></html>
   `);
@@ -261,11 +255,13 @@ const PORT = process.env.PORT || process.argv[2] || 3000; // Mac usa 5000 para A
 if (process.env.VERCEL) {
   module.exports = app;
 } else {
-  const server = app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', async () => {
     console.log('='.repeat(50));
     console.log('Servidor de captura de IPs iniciado (Node.js)');
     console.log(`Comparte este link: http://localhost:${PORT}/`);
     console.log(`Para ver las IPs: http://localhost:${PORT}/ver-ips`);
+    const { conectado, mensaje } = await verificarConexion();
+    console.log(conectado ? `✓ ${mensaje}` : `⚠ ${mensaje}`);
     console.log('='.repeat(50));
   });
 

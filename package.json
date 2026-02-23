@@ -4,12 +4,15 @@
   "description": "Servidor para capturar IPs y ubicación - Tarea ciberseguridad",
   "main": "servidor_ip.js",
   "scripts": {
-    "start": "node servidor_ip.js"
+    "start": "node servidor_ip.js",
+    "vercel-build": "echo 'ok'"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "express": "^5.2.1"
+    "dotenv": "^16.3.1",
+    "express": "^5.2.1",
+    "mongoose": "^8.0.0"
   }
 }
